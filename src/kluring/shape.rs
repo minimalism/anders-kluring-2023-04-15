@@ -72,6 +72,12 @@ impl ShapeBag {
         self.remaining[shape_index] -= 1;
     }
 
+    pub fn reset(&mut self, count: u16) {
+        for i in 0..self.remaining.len() {
+            self.remaining[i] = count;
+        }
+    }
+
     pub fn load(count: u16) -> ShapeBag {
         let shapes = vec![
             Shape::from_string(0, "X

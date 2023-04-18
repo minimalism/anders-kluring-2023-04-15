@@ -1,5 +1,4 @@
 use bevy::prelude::*;
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use kluring::KluringPlugin;
 
 mod kluring;

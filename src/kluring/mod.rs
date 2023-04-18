@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
 
-use self::{shape::{ShapeBag, Shape}, ui::ShowUiPlugin};
+use self::{shape::{ShapeBag, Shape}, ui::{ShowUiPlugin, InputFieldsState}};
 
 mod shape;
 mod ui;
@@ -13,6 +13,7 @@ pub struct KluringPlugin;
 impl Plugin for KluringPlugin {
     fn build(&self, app: &mut App) {
         app
+            .add_event::<RestartEvent>()
             .add_plugin(TilemapPlugin)
             .add_plugin(ShowUiPlugin)
             .add_startup_system(create_terrain)
@@ -20,8 +21,10 @@ impl Plugin for KluringPlugin {
             .insert_resource(BoardState { 
                 positions: HashSet::new(),
                 bounds: Bounds::new(),
+                attempts: 0,
             })
             .add_system(place_shape/*.run_if(on_event::<PlaceShapeEvent>())*/)
+            .add_system(reset.run_if(on_event::<RestartEvent>()))
         ;
     }
 }
@@ -30,6 +33,7 @@ impl Plugin for KluringPlugin {
 pub struct BoardState {
     positions: HashSet<TilePos>,
     bounds: Bounds,
+    attempts: usize,
 }
 
 struct GlobalPos {
@@ -62,6 +66,8 @@ fn place_shape(
                     x: border_pos.x + origin_pos.0 as u32,
                     y: border_pos.y + origin_pos.1 as u32,
                 };
+
+                state.attempts += 1;
 
                 if is_valid_placement(
                     &attempt_pos,
@@ -258,4 +264,53 @@ impl Bounds {
         self.min_x = global_pos.x.min(self.min_x);
         self.min_y = global_pos.y.min(self.min_y);
     }    
+}
+
+
+pub struct RestartEvent {}
+
+fn reset(
+    mut shapes: ResMut<ShapeBag>,
+    mut commands: Commands,
+    mut tilemap: Query<&mut TileStorage>,
+    mut state: ResMut<BoardState>,
+    border: Query<&TilePos, With<BorderTile>>,
+    input_fields: Query<&InputFieldsState>,
+) {
+    
+    let mut tile_storage = tilemap
+        .get_single_mut().expect("Need a tilemap");
+
+    // clear tiles
+    for tile_pos in state.positions.drain() {
+        if let Some(entity) = tile_storage.get(&tile_pos) {
+            commands.entity(entity).despawn_recursive();
+            tile_storage.remove(&tile_pos);
+        }
+    }
+
+    // clear borders
+    for tile_pos in border.iter() {
+        if let Some(entity) = tile_storage.get(&tile_pos) {
+            commands.entity(entity).despawn_recursive();
+            tile_storage.remove(&tile_pos);
+        }
+    }
+
+    // apparently we get one state per input widget
+    // but whatever
+    let mut count = 1;
+    for input_field in input_fields.iter() {
+        if let Ok(n) = input_field.n.parse::<u16>() {
+            count = n;
+        }
+        break;
+    }
+    
+
+    shapes.reset(count);
+
+    state.positions = HashSet::new();
+    state.attempts = 0;
+    state.bounds = Bounds::new();
 }
