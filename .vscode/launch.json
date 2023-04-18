@@ -1,0 +1,21 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "(Windows) Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/target/debug/anders-kluring.exe",
+            "stopAtEntry": false,
+            "environment": [
+                {
+                    "name": "CARGO_MANIFEST_DIR",
+                    "value": "${workspaceFolder}"
+                }
+            ],
+            "args": [],
+            "cwd": "${workspaceFolder}",
+            "preLaunchTask": "cargo build"
+        }
+    ]
+}

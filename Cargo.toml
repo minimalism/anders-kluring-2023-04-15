@@ -1,0 +1,12 @@
+[package]
+name = "anders-kluring"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bevy = "0.10"
+bevy_ecs_tilemap = { version = "0.10", features = ["atlas"] }
+bevy-inspector-egui = "0.18"
+kayak_ui = "0.3"
