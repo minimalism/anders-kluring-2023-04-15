@@ -3,10 +3,11 @@ use std::collections::HashSet;
 use bevy::prelude::*;
 use bevy_ecs_tilemap::prelude::*;
 
-use self::{shape::{ShapeBag, Shape}, ui::{ShowUiPlugin, InputFieldsState}};
+use self::{shape::{ShapeBag, Shape, ShapePermutation}, ui::{ShowUiPlugin, InputFieldsState}, tile::{TilePlugin, ChunkManager, BorderTile, CHUNK_SIZE, GlobalPos, to_chunk_pos}};
 
 mod shape;
 mod ui;
+mod tile;
 
 pub struct KluringPlugin;
 
@@ -16,156 +17,240 @@ impl Plugin for KluringPlugin {
             .add_event::<RestartEvent>()
             .add_plugin(TilemapPlugin)
             .add_plugin(ShowUiPlugin)
-            .add_startup_system(create_terrain)
+            .add_plugin(TilePlugin)
+            .add_event::<PlaceShapeEvent>()
             .insert_resource(ShapeBag::load(1))
             .insert_resource(BoardState { 
                 positions: HashSet::new(),
                 bounds: Bounds::new(),
                 attempts: 0,
             })
-            .add_system(place_shape/*.run_if(on_event::<PlaceShapeEvent>())*/)
+            .add_systems((find_best_shape, place_shape, update_boundary_score).chain())/*.run_if(on_event::<PlaceShapeEvent>())*/
             .add_system(reset.run_if(on_event::<RestartEvent>()))
         ;
     }
 }
 
+pub struct PlaceShapeEvent {
+    permutation: ShapePermutation,
+    pos: GlobalPos,
+}
+
 #[derive(Resource)]
 pub struct BoardState {
-    positions: HashSet<TilePos>,
+    positions: HashSet<GlobalPos>,
     bounds: Bounds,
     attempts: usize,
 }
 
-struct GlobalPos {
-    x: i32,
-    y: i32,
-}
+const INITIAL: GlobalPos = GlobalPos {
+    x: (CHUNK_SIZE / 2) as i32,
+    y: (CHUNK_SIZE / 2) as i32,
+};
 
-fn place_shape(
-    mut shapes: ResMut<ShapeBag>,
-    mut commands: Commands,
-    mut tilemap: Query<(&mut TileStorage, Entity)>,
+fn find_best_shape(
     mut state: ResMut<BoardState>,
-    border: Query<(&BorderTile, &TilePos)>,
+    bag: Res<ShapeBag>,
+    border_query: Query<&BorderTile>,
+    mut place_shape_event: EventWriter<PlaceShapeEvent>,
 ) {
-    let (mut tile_storage, tilemap_entity) = tilemap
-        .get_single_mut().expect("Need a tilemap");
+    if state.positions.len() == 0 {
 
-    let candidate_positions = collect_candidate_positions(border);
+        // degenerate case: just place any ole tile first.
+        let permutation = bag.get_random_permutation();
 
-    let available_shapes: Vec<&Shape> = shapes.iter_available().collect();
+        place_shape_event.send(PlaceShapeEvent {
+            permutation,
+            pos: INITIAL.clone(),
+        });
 
-    let mut placed_shape: Option<usize> = None;
-    
-    'outer: for shape in available_shapes {
-        for border_pos in candidate_positions.iter() {
-            
-            for origin_pos in shape.iter_pos() {
+    } else {
 
-                let attempt_pos = TilePos {
-                    x: border_pos.x + origin_pos.0 as u32,
-                    y: border_pos.y + origin_pos.1 as u32,
-                };
+        let best_positions = collect_candidate_positions(border_query);
 
-                state.attempts += 1;
+        for shape in bag.iter_available() {
 
-                if is_valid_placement(
-                    &attempt_pos,
-                    shape,
-                    &state,
-                ) {
+            let permutation = ShapePermutation {
+                index: shape.index,
+                rotation: 0,
+                flipped: false,
+            };
 
-                    let mut border = HashSet::new();
-            
-                    for tile_pos in shape.iter_tilepos(attempt_pos) {
-            
-                        // out with the old
-                        if let Some(old_tile) = tile_storage.get(&tile_pos) {
-                            commands.entity(old_tile).despawn_recursive();
-                            tile_storage.remove(&tile_pos);
-                        }
+            for border_pos in best_positions.iter() {
                 
-                        // in with the new
-                        let new_tile = commands
-                            .spawn((
-                                TileBundle {
-                                    position: tile_pos,
-                                    tilemap_id: TilemapId(tilemap_entity),
-                                    texture_index: TileTextureIndex(shape.index as u32),
-                                    ..Default::default()
-                                },
-                            ))
-                            .id();
-            
-                        tile_storage.set(&tile_pos, new_tile);
-                        commands.entity(tilemap_entity).add_child(new_tile); // add tile as a child of tilemap to keep inspector view clean
-            
-                        for neighbor_pos in iter_moore(tile_pos) {
-                            border.insert(neighbor_pos);
-                        }
+                for attempt_pos in bag.iter_globalpos(&permutation, border_pos.clone()) {
+    
+                    state.attempts += 1;
+    
+                    if get_placement_score(
+                        &attempt_pos,
+                        &permutation,
+                        &bag,
+                        &state,
+                    ).is_some() {
+                        place_shape_event.send(PlaceShapeEvent {
+                            permutation,
+                            pos: attempt_pos,
+                        });
 
-                        // record in state...
-                        let global_pos = GlobalPos {
-                            x: tile_pos.x as i32,
-                            y: tile_pos.y as i32,
-                        };
-
-                        state.positions.insert(tile_pos);
-
-                        state.bounds.expand(&global_pos);
+                        return;
                     }
-            
-                    for neighbor in border.iter() {
-                        if tile_storage.get(&neighbor).is_none() {
-            
-                            let boundary_tile = commands
-                                .spawn((
-                                    TileBundle {
-                                        position: *neighbor,
-                                        tilemap_id: TilemapId(tilemap_entity),
-                                        texture_index: TileTextureIndex(6),
-                                        ..Default::default()
-                                    },
-                                ))
-                                .insert(BorderTile {
-            
-                                })
-                                .id();
-            
-            
-                            tile_storage.set(neighbor, boundary_tile)
-                        }
-                    }
-
-                    placed_shape = Some(shape.index);
-                    break 'outer;
                 }
             }
         }
     }
 
-    if let Some(shape_index) = placed_shape {
-        shapes.try_pop(shape_index);
+}
+
+fn place_shape(
+    mut tilemap: Query<(&mut TileStorage, Entity)>,
+    mut bag: ResMut<ShapeBag>,
+    mut place_shape_events: EventReader<PlaceShapeEvent>,
+    mut commands: Commands,
+    mut state: ResMut<BoardState>,
+) {
+    let mut border = HashSet::new();
+
+    let (mut tile_storage, tilemap_entity) = tilemap
+        .get_single_mut().expect("Need a tilemap");
+
+    for place_shape_event in place_shape_events.iter() {
+
+        let shape = &place_shape_event.permutation;
+        let attempt_pos = place_shape_event.pos;
+
+        bag.try_pop(shape.index);
+
+        for global_pos in bag.iter_globalpos(&shape, attempt_pos.clone()) {
+    
+            let (chunk_pos, tile_pos) = to_chunk_pos(&global_pos);
+    
+            // let (tile_storage, tilemap_entity) = get_or_create_chunk(chunk_pos);
+    
+            // out with the old
+            if let Some(old_tile) = tile_storage.get(&tile_pos) {
+                commands.entity(old_tile).despawn_recursive();
+                tile_storage.remove(&tile_pos);
+            }
+    
+            // in with the new
+            let new_tile = commands
+                .spawn((
+                    TileBundle {
+                        position: tile_pos,
+                        tilemap_id: TilemapId(tilemap_entity),
+                        texture_index: TileTextureIndex(shape.index as u32),
+                        ..Default::default()
+                    },
+                ))
+                .id();
+    
+            tile_storage.set(&tile_pos, new_tile);
+            commands.entity(tilemap_entity).add_child(new_tile); // add tile as a child of tilemap to keep inspector view clean
+    
+            for neighbor_pos in iter_moore(global_pos) {
+                border.insert(neighbor_pos);
+            }
+    
+            state.bounds.expand(&global_pos);
+            state.positions.insert(global_pos);
+        }
+    
+    }
+
+    // update border...
+    for border_pos in border.iter() {
+    
+        let (chunk_pos, neighbor) = to_chunk_pos(&border_pos);
+
+        if tile_storage.get(&neighbor).is_none() {
+
+            let boundary_tile = commands
+                .spawn((
+                    TileBundle {
+                        position: neighbor,
+                        tilemap_id: TilemapId(tilemap_entity),
+                        texture_index: TileTextureIndex(6),
+                        // color: TileColor(Color::Rgba { red: 1., green: 0., blue: 0., alpha: 0.5 }),
+                        ..Default::default()
+                    },
+                ))
+                .insert(BorderTile {
+                    adjacency_score: 0,
+                    distance_score: 0,
+                    global_pos: border_pos.clone()
+                })
+                .id();
+
+            tile_storage.set(&neighbor, boundary_tile);
+        }
+    }
+
+}
+
+fn update_boundary_score(
+    state: Res<BoardState>,
+    mut border_query: Query<(&mut BorderTile, &mut TileColor)>,
+) {
+
+    const MAX_ADJACENCY_SCORE: f32 = 4.;
+
+    let center_of_mass = INITIAL.clone();   // todo
+
+    let max_distance = ((state.bounds.width().pow(2) + state.bounds.height().pow(2)) as f32).sqrt();
+
+    for (mut border, mut color) in border_query.iter_mut() {
+
+        border.adjacency_score = 0;
+        for neighbor in iter_moore(border.global_pos) {
+            if state.positions.contains(&neighbor) {
+                border.adjacency_score += 1;
+            }
+        }
+
+        let distance_x = (border.global_pos.x - center_of_mass.x).abs() as f32;
+        let distance_y = (border.global_pos.y - center_of_mass.y).abs() as f32;
+        let distance = (distance_x.powi(2) + distance_y.powi(2)).sqrt();
+
+        let normalized_distance = (max_distance - distance) / max_distance;
+        border.distance_score = (normalized_distance * 10.) as i32;
+        
+        // calculate adjacency score and update color
+        color.0 = Color::rgba(
+            border.adjacency_score as f32 / MAX_ADJACENCY_SCORE, 
+            normalized_distance,
+            0.,
+            1.);
     }
 }
 
 
-fn collect_candidate_positions(border_query: Query<(&BorderTile, &TilePos)>) -> Vec<TilePos> {
-    let mut border: Vec<TilePos> = border_query.iter().map(|(_border, pos)| *pos).collect();
+fn collect_candidate_positions(border_query: Query<&BorderTile>) -> Vec<GlobalPos> {
+
+    let mut border_tiles: Vec<&BorderTile> = border_query
+        .iter()
+        .collect();
+
+    border_tiles.sort_by(|a, b| b.score().cmp(&a.score()));
+
+    let mut border: Vec<GlobalPos> = border_tiles
+        .iter()
+        .map(|border| border.global_pos.clone())
+        .collect();
 
     if border.len() == 0 {
 
         // start at center...
-        let x = MAP_WIDTH / 2;
-        let y = MAP_HEIGHT / 2;
+        let x = (CHUNK_SIZE / 2) as i32;
+        let y = (CHUNK_SIZE / 2) as i32;
 
-        border.push(TilePos { x, y });
+        border.push(GlobalPos { x, y });
     }
 
     return border;
 }
 
-fn iter_moore(tile_pos: TilePos) -> impl Iterator<Item = TilePos> {
+fn iter_moore(tile_pos: GlobalPos) -> impl Iterator<Item = GlobalPos> {
     const NEIGHBORHOOD: [(i32, i32); 4] = [
         ( 1, 0),
         ( 0, 1),
@@ -173,63 +258,27 @@ fn iter_moore(tile_pos: TilePos) -> impl Iterator<Item = TilePos> {
         ( 0,-1),
     ];
 
-    NEIGHBORHOOD.iter().map(move |xy| TilePos { 
-        x: (tile_pos.x as i32 + xy.0) as u32,
-        y: (tile_pos.y as i32 + xy.1) as u32,
+    NEIGHBORHOOD.iter().map(move |xy| GlobalPos { 
+        x: (tile_pos.x + xy.0),
+        y: (tile_pos.y + xy.1),
      })
 }
 
-fn is_valid_placement(
-    offset: &TilePos,
-    shape: &Shape,
+fn get_placement_score(
+    offset: &GlobalPos,
+    shape: &ShapePermutation,
+    bag: &ShapeBag,
     state: &BoardState,
-) -> bool {
-    for tile_pos in shape.iter_tilepos(*offset) { 
+) -> Option<i32> {
+
+    let score = 1;
+
+    for tile_pos in bag.iter_globalpos(&shape, offset.clone()) { 
         if state.positions.get(&tile_pos).is_some() {
-            return false;
+            return None;
         }
     }
-    return true;
-}
-
-pub const MAP_WIDTH: u32 = 64;
-pub const MAP_HEIGHT: u32 = 64;
-pub const TILE_SIZE: f32 = 16.;
-
-fn create_terrain(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-) {
-    let texture_handle: Handle<Image> = asset_server.load("tiles.png");
-
-
-    let w = MAP_WIDTH;
-    let h = MAP_HEIGHT;
-    let map_size = TilemapSize { x: w, y: h };
-    let tile_storage = TileStorage::empty(map_size);
-    let tilemap_entity = commands.spawn_empty().id();
-
-    let tile_size = TilemapTileSize { x: TILE_SIZE, y: TILE_SIZE };
-    let grid_size = tile_size.into();
-    let map_type = TilemapType::default();
-
-    commands.entity(tilemap_entity).insert(TilemapBundle {
-        grid_size,
-        map_type,
-        size: map_size,
-        storage: tile_storage,
-        texture: TilemapTexture::Single(texture_handle),
-        tile_size,
-        frustum_culling: bevy_ecs_tilemap::FrustumCulling(false),
-        transform: get_tilemap_center_transform(&map_size, &grid_size, &map_type, 0.0),
-        ..Default::default()
-    });
-}
-
-
-#[derive(Component)]
-struct BorderTile {
-
+    return Some(score);
 }
 
 pub struct Bounds {
@@ -257,6 +306,14 @@ impl Bounds {
 
     }
 
+    fn width(&self) -> i32 {
+        self.max_x - self.min_x + 1
+    }
+    
+    fn height(&self) -> i32 {
+        self.max_y - self.min_y + 1
+    }
+
     fn expand(&mut self, global_pos: &GlobalPos) {
 
         self.max_x = global_pos.x.max(self.max_x);
@@ -282,7 +339,10 @@ fn reset(
         .get_single_mut().expect("Need a tilemap");
 
     // clear tiles
-    for tile_pos in state.positions.drain() {
+    for global_pos in state.positions.drain() {
+
+        let (chunk_pos, tile_pos) = to_chunk_pos(&global_pos);
+
         if let Some(entity) = tile_storage.get(&tile_pos) {
             commands.entity(entity).despawn_recursive();
             tile_storage.remove(&tile_pos);

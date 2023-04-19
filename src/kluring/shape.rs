@@ -1,9 +1,10 @@
-use bevy::prelude::*;
-use bevy_ecs_tilemap::tiles::TilePos;
+use bevy::{prelude::*};
+use super::tile::GlobalPos;
 
-pub struct ShapeInstance {
-    rotation: u8,
-    flipped: bool
+pub struct ShapePermutation {
+    pub index: usize,
+    pub rotation: u8,
+    pub flipped: bool
 }
 
 pub struct Shape {
@@ -45,12 +46,12 @@ impl Shape {
         self.tiles.iter()
     }
 
-    pub fn iter_tilepos(&self, offs: TilePos) -> impl Iterator<Item=TilePos> + '_ {
+    pub fn iter_globalpos(&self, offs: GlobalPos) -> impl Iterator<Item=GlobalPos> + '_ {
         self.tiles.iter().map(move |(pos_x, pos_y)| {
-            let x = offs.x + *pos_x as u32;
-            let y = offs.y + *pos_y as u32;
+            let x = offs.x + *pos_x as i32;
+            let y = offs.y + *pos_y as i32;
 
-            TilePos { x, y }
+            GlobalPos { x, y }
         })
     }
     
@@ -75,6 +76,20 @@ impl ShapeBag {
     pub fn reset(&mut self, count: u16) {
         for i in 0..self.remaining.len() {
             self.remaining[i] = count;
+        }
+    }
+
+    pub fn iter_globalpos(&self, permutation: &ShapePermutation, offs: GlobalPos) -> impl Iterator<Item=GlobalPos> + '_ {
+        self.vec[permutation.index].iter_globalpos(offs)
+    }
+
+    pub fn get_random_permutation(&self) -> ShapePermutation {
+
+        // TODO: pick random from available...
+        ShapePermutation {
+            index: 2,
+            flipped: true,
+            rotation: 2,
         }
     }
 

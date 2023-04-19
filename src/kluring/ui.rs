@@ -38,8 +38,8 @@ fn statewidget_render(
             w.area_y = 0;
             w.attempts = 0;
         } else {
-            w.area_x = board_state.bounds.max_x - board_state.bounds.min_x;
-            w.area_y = board_state.bounds.max_y - board_state.bounds.min_y;
+            w.area_x = board_state.bounds.width();
+            w.area_y = board_state.bounds.height();
             w.attempts = board_state.attempts;
         }
 
