@@ -9,3 +9,4 @@ edition = "2021"
 bevy = "0.10"
 bevy_ecs_tilemap = { version = "0.10", features = ["atlas"] }
 kayak_ui = "0.3"
+rand = "0.8.5"

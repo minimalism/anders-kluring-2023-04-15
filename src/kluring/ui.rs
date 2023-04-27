@@ -221,8 +221,8 @@ fn menu_button_render(
         widget_context.use_state(&mut commands, entity, ButtonState { hovering: false });
 
     let button_text = menu_button_query.get(entity).unwrap().text.clone();
-    let button_image = asset_server.load("main_menu/button.png");
-    let button_image_hover = asset_server.load("main_menu/button-hover.png");
+    let button_image = asset_server.load("button.png");
+    let button_image_hover = asset_server.load("button-hover.png");
 
     let on_event = OnEvent::new(
         move |In((event_dispatcher_context, _, mut event, _entity)): In<(

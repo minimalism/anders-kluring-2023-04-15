@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::{HashSet, HashMap}, ops::{Sub, Add}};
 use bevy_ecs_tilemap::prelude::*;
 
 use bevy::prelude::*;
@@ -15,7 +15,7 @@ impl Plugin for TilePlugin {
 
 #[derive(Default, Debug, Resource)]
 pub struct ChunkManager {
-    pub spawned_chunks: HashSet<IVec2>,
+    pub spawned_chunks: HashMap<IVec2, Entity>,
 }
 
 pub const TILE_SIZE: f32 = 16.;
@@ -96,6 +96,22 @@ pub fn to_chunk_pos(global: &GlobalPos) -> (IVec2, TilePos) {
 pub struct GlobalPos {
     pub x: i32,
     pub y: i32,
+}
+
+impl Add for GlobalPos {
+    type Output = GlobalPos;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        GlobalPos { x: self.x + rhs.x, y: self.y + rhs.y }
+    }
+}
+
+impl Sub for GlobalPos {
+    type Output = GlobalPos;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        GlobalPos { x: self.x - rhs.x, y: self.y - rhs.y }
+    }
 }
 
 #[derive(Component)]

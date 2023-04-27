@@ -1,16 +1,23 @@
 use bevy::{prelude::*};
 use super::tile::GlobalPos;
+use rand::Rng;
 
+#[derive(Copy, Clone)]
 pub struct ShapePermutation {
     pub index: usize,
+    pub permutation: Permutation,
+}
+
+#[derive(Copy, Clone)]
+pub struct Permutation {
     pub rotation: u8,
-    pub flipped: bool
+    pub flipped: bool,
 }
 
 pub struct Shape {
     pub index: usize,
-    bounds: (u8, u8),
-    tiles: Vec<(u8, u8)>,
+    bounds: (i32, i32),
+    pub tiles: Vec<GlobalPos>,
 }
 
 impl Shape {
@@ -27,7 +34,7 @@ impl Shape {
             let mut x = 0;
             for char in line.chars() {
                 if !char.is_whitespace() {
-                    tiles.push((x, y));
+                    tiles.push(GlobalPos { x, y });
                 }
                 x += 1;
             }
@@ -42,14 +49,14 @@ impl Shape {
         };
     }
 
-    pub fn iter_pos(&self) -> impl Iterator<Item=&(u8, u8)> + '_ {
+    pub fn iter_pos(&self) -> impl Iterator<Item=&GlobalPos> + '_ {
         self.tiles.iter()
     }
 
-    pub fn iter_globalpos(&self, offs: GlobalPos) -> impl Iterator<Item=GlobalPos> + '_ {
-        self.tiles.iter().map(move |(pos_x, pos_y)| {
-            let x = offs.x + *pos_x as i32;
-            let y = offs.y + *pos_y as i32;
+    pub fn iter_globalpos_offset(&self, offs: GlobalPos) -> impl Iterator<Item=GlobalPos> + '_ {
+        self.tiles.iter().map(move |pos| {
+            let x = offs.x + pos.x;
+            let y = offs.y + pos.y;
 
             GlobalPos { x, y }
         })
@@ -69,8 +76,13 @@ impl ShapeBag {
         self.vec.iter().filter(|shape| self.remaining[shape.index] > 0)
     }
 
-    pub fn try_pop(&mut self, shape_index: usize) {
-        self.remaining[shape_index] -= 1;
+    pub fn try_pop(&mut self, shape_index: usize) -> bool {
+
+        if self.remaining[shape_index] > 0 {
+            self.remaining[shape_index] -= 1;
+            return true;
+        }
+        return false;
     }
 
     pub fn reset(&mut self, count: u16) {
@@ -79,17 +91,42 @@ impl ShapeBag {
         }
     }
 
-    pub fn iter_globalpos(&self, permutation: &ShapePermutation, offs: GlobalPos) -> impl Iterator<Item=GlobalPos> + '_ {
-        self.vec[permutation.index].iter_globalpos(offs)
+    pub fn iter_pos(&self, shape_permutation: &ShapePermutation) -> Vec<GlobalPos> {
+        let mut ret = self.vec[shape_permutation.index].tiles.clone();
+
+        let rotations = shape_permutation.permutation.rotation % 4;
+        if rotations != 0 {
+            let rotation_matrix = match rotations {
+                1 => [[0, -1], [1, 0]],   // 90 degrees counterclockwise
+                2 => [[-1, 0], [0, -1]],  // 180 degrees
+                3 => [[0, 1], [-1, 0]],  // 270 degrees counterclockwise
+                _ => [[1, 0], [0, 1]],   // 0 degrees (identity matrix)
+            };
+
+            for point in &mut ret {
+                let x = point.x * rotation_matrix[0][0] + point.y * rotation_matrix[0][1];
+                let y = point.x * rotation_matrix[1][0] + point.y * rotation_matrix[1][1];
+                point.x = x;
+                point.y = y;
+            }
+        }
+
+        ret
     }
 
     pub fn get_random_permutation(&self) -> ShapePermutation {
+        let mut rng = rand::thread_rng();
 
-        // TODO: pick random from available...
+        let index = rng.gen::<usize>() % self.remaining.len();
+        let flipped = rng.gen::<i32>() % 2 == 0;
+        let rotation = rng.gen::<u8>() % 4;
+
         ShapePermutation {
-            index: 2,
-            flipped: true,
-            rotation: 2,
+            index,
+            permutation: Permutation {
+                flipped,
+                rotation,
+            },
         }
     }
 
