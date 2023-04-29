@@ -1,11 +1,11 @@
 use std::collections::{HashSet, HashMap, hash_map::Entry};
 
-use bevy::prelude::*;
+use bevy::{prelude::*};
 use bevy_ecs_tilemap::prelude::*;
 
-use crate::kluring::shape::Permutation;
+use crate::kluring::{shape::Permutation, tile::{TILEMAP_SIZE, create_chunk}};
 
-use self::{shape::{ShapeBag, Shape, ShapePermutation}, ui::{ShowUiPlugin, InputFieldsState}, tile::{TilePlugin, ChunkManager, BorderTile, CHUNK_SIZE, GlobalPos, to_chunk_pos}};
+use self::{shape::{ShapeBag, Shape, ShapePermutation}, ui::{ShowUiPlugin, InputFieldsState}, tile::{TilePlugin, ChunkManager, BorderTile, CHUNK_SIZE, GlobalPos}};
 
 mod shape;
 mod ui;
@@ -148,22 +148,36 @@ fn find_best_shape(
 }
 
 fn place_shape(
-    mut tilemap: Query<(&mut TileStorage, Entity)>,
+    mut tilemap: Query<&mut TileStorage>,
     mut bag: ResMut<ShapeBag>,
     mut place_shape_events: EventReader<PlaceShapeEvent>,
     mut commands: Commands,
     mut state: ResMut<BoardState>,
     mut chunk_manager: ResMut<ChunkManager>,
+    asset_server: Res<AssetServer>,
 ) {
     let mut border = HashSet::new();
-
-    let (mut tile_storage, tilemap_entity) = tilemap
-        .get_single_mut().expect("Need a tilemap");
-
     
     // First, group all tiles we want to place by their appropriate chunk...
-
+    
     let mut tiles_per_chunk: HashMap<IVec2, Vec<(TilePos, usize)>> = HashMap::new();
+
+    fn place_tile(
+        shape_index: usize,
+        tiles_per_chunk: &mut HashMap<IVec2, Vec<(TilePos, usize)>>,
+        global_pos: &GlobalPos,
+    ) {
+        let (chunk_pos, tile_pos) = global_pos.to_chunk_pos();
+
+        match tiles_per_chunk.entry(chunk_pos) {
+            Entry::Occupied(mut entry) => {
+                entry.get_mut().push((tile_pos, shape_index));
+            },
+            Entry::Vacant(entry) => {
+                entry.insert(vec![(tile_pos, shape_index)]);
+            },
+        }
+    }
 
     for place_shape_event in place_shape_events.iter() {
 
@@ -177,19 +191,7 @@ fn place_shape(
         for shape_pos in bag.iter_pos(&shape) {
             
             let global_pos = shape_pos + attempt_pos;
-
-            let (chunk_pos, tile_pos) = to_chunk_pos(&global_pos);
-    
-            // println!("Placing tile {} at {}, {}", shape.index, global_pos.x, global_pos.y);
-
-            match tiles_per_chunk.entry(chunk_pos) {
-                Entry::Occupied(mut entry) => {
-                    entry.get_mut().push((tile_pos, shape.index));
-                },
-                Entry::Vacant(entry) => {
-                    entry.insert(vec![(tile_pos, shape.index)]);
-                },
-            }
+            place_tile(shape.index, &mut tiles_per_chunk, &global_pos);
        
             for neighbor_pos in iter_moore(global_pos) {
                 border.insert(neighbor_pos);
@@ -206,54 +208,28 @@ fn place_shape(
     }
 
     // update border...
+    const BORDER_INDEX: usize = 6;
     for border_pos in border.iter() {
 
-        let (chunk_pos, neighbor) = to_chunk_pos(&border_pos);
-
-        if tile_storage.get(&neighbor).is_none() {
-
-            //if state.scored_positions.contains_key(border_pos) {
-            //    panic!("New border tile should be clear");
-            //}
-
-            let boundary_tile = commands
-                .spawn((
-                    TileBundle {
-                        position: neighbor,
-                        tilemap_id: TilemapId(tilemap_entity),
-                        texture_index: TileTextureIndex(6),
-                        // color: TileColor(Color::Rgba { red: 1., green: 0., blue: 0., alpha: 0.5 }),
-                        ..Default::default()
-                    },
-                ))
-                .insert(BorderTile {
-                    adjacency_score: 0,
-                    distance_score: 0,
-                    global_pos: border_pos.clone()
-                })
-                .id();
-
-            tile_storage.set(&neighbor, boundary_tile);
+        //let (chunk_pos, neighbor) = to_chunk_pos(&border_pos);
+        if !state.scored_positions.contains_key(&border_pos) {
+            place_tile(BORDER_INDEX, &mut tiles_per_chunk, &border_pos);
         }
     }
 
-    // Then, step through all chunks and allocate tiles in the right chunk
-
-    for (chunk_pos, placed_tiles) in tiles_per_chunk {
-        
-        // Get chunk by pos...
-
-        //chunk_manager.spawned_chunks
-
+    fn create_tiles(
+        commands: &mut Commands,
+        tilemap_entity: Entity,
+        chunk_pos: IVec2,
+        placed_tiles: Vec<(TilePos, usize)>,
+    ) -> Vec<(TilePos, Entity)> {
+        let mut placed = Vec::new();
         for (tile_pos, shape_index) in placed_tiles {
-            // out with the old
-            if let Some(old_tile) = tile_storage.get(&tile_pos) {
-                commands.entity(old_tile).despawn_recursive();
-                tile_storage.remove(&tile_pos);
-            }
+
+            //println!("Placing tile {} at {}, {}", shape_index, tile_pos.x, tile_pos.y);
 
             // in with the new
-            let new_tile = commands
+            let mut new_tile_commands = commands
                 .spawn((
                     TileBundle {
                         position: tile_pos,
@@ -262,12 +238,74 @@ fn place_shape(
                         color: TileColor(Color::Rgba { red: 1., green: 1., blue: 1., alpha: 1. }),
                         ..Default::default()
                     },
-                ))
-                .id();
+                ));
 
-            tile_storage.set(&tile_pos, new_tile);
-            commands.entity(tilemap_entity).add_child(new_tile); // add tile as a child of tilemap to keep inspector view clean
-     
+            if shape_index == BORDER_INDEX {
+                new_tile_commands.insert(BorderTile {
+                    adjacency_score: 0,
+                    distance_score: 0,
+                    global_pos: GlobalPos::from_chunk_tile(&chunk_pos, &tile_pos)
+                });
+            }
+
+            let new_tile_id = new_tile_commands.id();
+
+            placed.push((tile_pos, new_tile_id));
+            
+        }
+        return placed;
+    }
+
+    // Then, step through all chunks and allocate tiles in the right chunk
+    for (chunk_pos, placed_tiles) in tiles_per_chunk {
+        
+        if let Some(tilemap_entity) = chunk_manager.spawned_chunks.get(&chunk_pos) {
+            //println!("Loading old chunk at {}, {}", chunk_pos.x, chunk_pos.y);
+            // Get chunk by pos...
+            let mut tile_storage = tilemap.get_mut(*tilemap_entity).unwrap();
+            let placed_tiles = create_tiles(
+                &mut commands,
+                *tilemap_entity,
+                chunk_pos,
+                placed_tiles);
+
+            for (tile_pos, new_tile_id) in placed_tiles {
+                // out with the old
+                if let Some(old_tile) = tile_storage.get(&tile_pos) {
+                    //println!("Despawning old tile at {}, {}", tile_pos.x, tile_pos.y);
+                    commands.entity(old_tile).despawn_recursive();
+                    tile_storage.remove(&tile_pos);
+                }
+                //println!("Spawning new tile at {}, {}", tile_pos.x, tile_pos.y);
+                tile_storage.set(&tile_pos, new_tile_id);
+            }
+        } else {
+            //println!("Creating new chunk at {}, {}", chunk_pos.x, chunk_pos.y);
+            // Create new chunk
+            let mut tile_storage = TileStorage::empty(TILEMAP_SIZE);
+
+            let tilemap_entity = commands.spawn_empty().id();
+
+            chunk_manager.spawned_chunks.insert(chunk_pos, tilemap_entity);
+
+            let placed_tiles = create_tiles(
+                &mut commands,
+                tilemap_entity,
+                chunk_pos,
+                placed_tiles);
+
+            for (tile_pos, new_tile_id) in placed_tiles {
+                // out with the old
+                if let Some(old_tile) = tile_storage.get(&tile_pos) {
+                    //println!("Despawning old tile at {}, {}", tile_pos.x, tile_pos.y);
+                    commands.entity(old_tile).despawn_recursive();
+                    tile_storage.remove(&tile_pos);
+                }
+                //println!("Spawning new tile at {}, {}", tile_pos.x, tile_pos.y);
+                tile_storage.set(&tile_pos, new_tile_id);
+            }
+
+            create_chunk(tilemap_entity, tile_storage, &mut commands, &asset_server, chunk_pos);
         }
     }
 }
@@ -311,7 +349,7 @@ fn update_boundary_score(
         let score = border.distance_score + border.adjacency_score;
         if let Some(prev) = state.scored_positions.insert(border.global_pos, score) {
             if prev == BLOCKED {
-                panic!("Overwrote blocked position");
+                panic!("Overwrote blocked position at {}, {}", border.global_pos.x, border.global_pos.y);
             }
         }
     }
@@ -462,7 +500,7 @@ fn reset(
     // clear tiles
     for (global_pos, _score) in state.scored_positions.drain() {
 
-        let (chunk_pos, tile_pos) = to_chunk_pos(&global_pos);
+        let (chunk_pos, tile_pos) = global_pos.to_chunk_pos();
 
         if let Some(entity) = tile_storage.get(&tile_pos) {
             commands.entity(entity).despawn_recursive();
