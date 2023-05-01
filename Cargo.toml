@@ -3,10 +3,33 @@ name = "anders-kluring"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+# build for wasm like so:
+# cargo build --profile wasm-release --target wasm32-unknown-unknown
+# wasm-bindgen --out-name wasm_kluring --out-dir wasm_site/target --target web target\wasm32-unknown-unknown\wasm-release\anders-kluring.wasm
+# # cargo install basic-http-server
+# basic-http-server wasm_rocket_ballet
+# todo use wasm-opt? https://github.com/bevyengine/bevy/tree/main/examples#wasm
+
 
 [dependencies]
 bevy = "0.10"
 bevy_ecs_tilemap = { version = "0.10", features = ["atlas"] }
 kayak_ui = "0.3"
 rand = "0.8.5"
+bevy-inspector-egui = "0.18"
+
+[profile.wasm-release]
+# Use release profile as default values
+inherits = "release"
+
+# Optimize with size in mind, also try "s", sometimes it is better.
+# This doesn't increase compilation times compared to -O3, great improvements
+opt-level = "z"
+
+# Do a second optimization pass removing duplicate or unused code from dependencies.
+# Slows compile times, marginal improvements
+lto = "fat"
+
+# When building crates, optimize larger chunks at a time
+# Slows compile times, marginal improvements
+codegen-units = 1

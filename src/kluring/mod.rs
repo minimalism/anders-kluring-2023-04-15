@@ -5,7 +5,11 @@ use bevy_ecs_tilemap::prelude::*;
 
 use crate::kluring::{shape::Permutation, tile::{TILEMAP_SIZE, create_chunk}};
 
-use self::{shape::{ShapeBag, Shape, ShapePermutation}, ui::{ShowUiPlugin, InputFieldsState}, tile::{TilePlugin, ChunkManager, BorderTile, CHUNK_SIZE, GlobalPos}};
+use self::{
+    shape::{ShapeBag, ShapePermutation},
+    ui::{ShowUiPlugin, InputFieldsState}, 
+    tile::{TilePlugin, ChunkManager, BorderTile, CHUNK_SIZE, GlobalPos}
+};
 
 mod shape;
 mod ui;
@@ -41,7 +45,12 @@ impl Plugin for KluringPlugin {
                 update_boundary_score,
             )/*.run_if(on_event::<PlaceShapeEvent>())*/
             //.add_system(.run_if(on_event::<RecalculateBoundary>()))
-            .add_system(reset.run_if(on_event::<RestartEvent>()))
+            .add_systems(
+                (
+                    reset.run_if(on_event::<RestartEvent>()),
+                    apply_system_buffers,
+                )
+            )
         ;
     }
 }
@@ -80,12 +89,13 @@ fn find_best_shape(
     if state.scored_positions.len() == 0 {
 
         // degenerate case: just place any ole tile first.
-        let permutation = bag.get_random_permutation();
+        if let Some(permutation) = bag.get_random_permutation() {
+            place_shape_event.send(PlaceShapeEvent {
+                permutation,
+                pos: INITIAL.clone(),
+            });
+        }
 
-        place_shape_event.send(PlaceShapeEvent {
-            permutation,
-            pos: INITIAL.clone(),
-        });
 
     } else {
 
@@ -310,8 +320,6 @@ fn place_shape(
     }
 }
 
-struct RecalculateBoundary { }
-
 fn update_boundary_score(
     mut state: ResMut<BoardState>,
     mut border_query: Query<(&mut BorderTile, &mut TileColor)>,
@@ -320,6 +328,10 @@ fn update_boundary_score(
     const MAX_ADJACENCY_SCORE: f32 = 4.;
 
     let center_of_mass = INITIAL.clone();   // todo
+
+    if state.bounds.is_default() {
+        return;
+    }
 
     let max_distance = ((state.bounds.width().pow(2) + state.bounds.height().pow(2)) as f32).sqrt();
 
@@ -486,33 +498,31 @@ pub struct RestartEvent {}
 fn reset(
     mut shapes: ResMut<ShapeBag>,
     mut commands: Commands,
-    mut tilemap: Query<&mut TileStorage>,
     mut state: ResMut<BoardState>,
-    border: Query<&TilePos, With<BorderTile>>,
+    chunk_manager: ResMut<ChunkManager>,
+    mut tilemap: Query<&mut TileStorage>,
     input_fields: Query<&InputFieldsState>,
 ) {
 
     println!("=== RESET ===");
-    
-    let mut tile_storage = tilemap
-        .get_single_mut().expect("Need a tilemap");
+
+    //let (tile_storage_entity, mut tile_storage) = tilemap
+    //    .get_single_mut().expect("Need a tilemap");
 
     // clear tiles
     for (global_pos, _score) in state.scored_positions.drain() {
 
         let (chunk_pos, tile_pos) = global_pos.to_chunk_pos();
 
-        if let Some(entity) = tile_storage.get(&tile_pos) {
-            commands.entity(entity).despawn_recursive();
-            tile_storage.remove(&tile_pos);
-        }
-    }
+        let tile_storage_entity = chunk_manager.spawned_chunks.get(&chunk_pos).unwrap();
 
-    // clear borders
-    for tile_pos in border.iter() {
+        let mut tile_storage = tilemap.get_mut(*tile_storage_entity).unwrap();
+
         if let Some(entity) = tile_storage.get(&tile_pos) {
             commands.entity(entity).despawn_recursive();
             tile_storage.remove(&tile_pos);
+        } else {
+            panic!("Could not retrieve tile from storage");
         }
     }
 
@@ -525,19 +535,10 @@ fn reset(
         }
         break;
     }
-    
 
     shapes.reset(count);
 
-    // state.scored_positions = HashMap::new();
+    //state.scored_positions = HashMap::new();
     state.attempts = 0;
     state.bounds = Bounds::new();
-}
-
-fn keyboard_input(
-    keys: Res<Input<KeyCode>>,
-) {
-    if keys.just_pressed(KeyCode::Space) {
-        info!("'A' just pressed");
-    }
 }

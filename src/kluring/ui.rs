@@ -46,6 +46,7 @@ fn statewidget_render(
         // Note: We will see two updates because of the mutable change to styles.
         // Which means when foo changes MyWidget will render twice!
         *computed_styles = KStyle {
+            font_size: StyleProp::Value(20.0),
             render_command: StyleProp::Value(RenderCommand::Text {
                 content: format!("Area: {} ({} * {}) ({} attempts)", w.area_x * w.area_y, w.area_x, w.area_y, w.attempts),
                 alignment: Alignment::Start,
@@ -102,7 +103,7 @@ struct TextBoxExample;
 #[derive(Component, Default, Clone, PartialEq)]
 pub struct InputFieldsState {
     pub n: String,
-    pub value2: String,
+    pub crunch: String,
 }
 
 impl Widget for TextBoxExample {}
@@ -134,7 +135,7 @@ fn update_input_fields(
         entity,
         InputFieldsState {
             n: "1".into(),
-            value2: "?".into(),
+            crunch: "50".into(),
         },
     );
 
@@ -148,29 +149,74 @@ fn update_input_fields(
             },
         );
 
-        let on_change2 = OnChange::new(
+        let on_change_crunch = OnChange::new(
             move |In((_widget_context, _, value)): In<(KayakWidgetContext, Entity, String)>,
                   mut state_query: Query<&mut InputFieldsState>| {
                 if let Ok(mut state) = state_query.get_mut(state_entity) {
-                    state.value2 = value;
+                    state.crunch = value;
                 }
             },
         );
 
         let parent_id = Some(entity);
         rsx! {
-            <ElementBundle>
+            <ElementBundle styles={KStyle{
+                layout_type: LayoutType::Grid.into(),
+                height: StyleProp::Value(Units::Pixels(100.)),
+                grid_rows: vec![Units::Stretch(1.0), Units::Stretch(1.0)].into(),
+                grid_cols: vec![Units::Stretch(1.0), Units::Stretch(1.0)].into(),
+                ..default()
+            }}>
+
+                <TextWidgetBundle
+                    styles={KStyle {
+                        row_index: 0.into(),
+                        col_index: 0.into(),
+                        ..Default::default()
+                    }}
+                    text={TextProps {
+                        alignment: Alignment::Start,
+                        content: "n =".to_string(),
+                        size: 28.0,
+                        ..Default::default()
+                    }}
+                />
+
                 <TextBoxBundle
                     styles={KStyle {
-                        bottom: StyleProp::Value(Units::Pixels(10.0)),
+                        row_index: 0.into(),
+                        col_index: 1.into(),
+                        font_size: StyleProp::Value(28.),
                         ..Default::default()
                     }}
                     text_box={TextBoxProps { value: textbox_state.n.clone(), ..Default::default()}}
                     on_change={on_change_n}
                 />
+
+                <TextWidgetBundle
+                    styles={KStyle {
+                        row_index: 1.into(),
+                        col_index: 0.into(),
+                        ..Default::default()
+                    }}
+                    text={TextProps {
+                        alignment: Alignment::Start,
+                        content: "Crunch =".to_string(),
+                        size: 28.0,
+                        ..Default::default()
+                    }}
+                />
+
+
                 <TextBoxBundle
-                    text_box={TextBoxProps { value: textbox_state.value2.clone(), ..Default::default()}}
-                    on_change={on_change2}
+                    styles={KStyle {
+                        row_index: 1.into(),
+                        col_index: 1.into(),
+                        font_size: StyleProp::Value(28.),
+                        ..Default::default()
+                    }}
+                    text_box={TextBoxProps { value: textbox_state.crunch.clone(), ..Default::default()}}
+                    on_change={on_change_crunch}
                 />
             </ElementBundle>
         };
@@ -308,7 +354,8 @@ fn startup_gui(
         .spawn((Camera2dBundle::default(), CameraUIKayak))
         .id();
 
-    font_mapping.set_default(asset_server.load("roboto.kayak_font"));
+    font_mapping.set_default(asset_server.load("font/roboto.kttf"));
+    //font_mapping.set_default(asset_server.load("roboto.kayak_font"));
 
     let mut widget_context = KayakRootContext::new(camera_entity);
     widget_context.add_plugin(KayakWidgetsContextPlugin);
@@ -372,7 +419,7 @@ fn startup_gui(
                 }}
                 styles={KStyle {
                     width: Units::Pixels(400.0).into(),
-                    height: Units::Pixels(200.0).into(),
+                    height: Units::Pixels(400.0).into(),
                     left: Units::Stretch(0.0).into(),
                     right: Units::Stretch(1.0).into(),
                     top: Units::Stretch(1.0).into(),

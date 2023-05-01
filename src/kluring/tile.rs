@@ -1,4 +1,4 @@
-use std::{collections::{HashSet, HashMap}, ops::{Sub, Add}};
+use std::{collections::{HashMap}, ops::{Sub, Add}};
 use bevy_ecs_tilemap::prelude::*;
 
 use bevy::prelude::*;
@@ -7,9 +7,7 @@ pub struct TilePlugin;
 
 impl Plugin for TilePlugin {
     fn build(&self, app: &mut App) {
-        app
-            .insert_resource(ChunkManager::default())
-            .add_startup_system(create_terrain);
+        app.insert_resource(ChunkManager::default());
     }
 }
 
@@ -60,14 +58,6 @@ pub fn create_chunk(
         ..Default::default()
     });
 }
-
-fn create_terrain(
-    commands: Commands,
-    asset_server: Res<AssetServer>,
-) {
-    // create_chunk(commands, asset_server, IVec2 { x: 0, y: 0 });
-}
-
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub struct GlobalPos {

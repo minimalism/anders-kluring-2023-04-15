@@ -48,19 +48,6 @@ impl Shape {
             bounds: (bounds_x, y),
         };
     }
-
-    pub fn iter_pos(&self) -> impl Iterator<Item=&GlobalPos> + '_ {
-        self.tiles.iter()
-    }
-
-    pub fn iter_globalpos_offset(&self, offs: GlobalPos) -> impl Iterator<Item=GlobalPos> + '_ {
-        self.tiles.iter().map(move |pos| {
-            let x = offs.x + pos.x;
-            let y = offs.y + pos.y;
-
-            GlobalPos { x, y }
-        })
-    }
     
 }
 
@@ -114,20 +101,23 @@ impl ShapeBag {
         ret
     }
 
-    pub fn get_random_permutation(&self) -> ShapePermutation {
+    pub fn get_random_permutation(&self) -> Option<ShapePermutation> {
         let mut rng = rand::thread_rng();
 
         let index = rng.gen::<usize>() % self.remaining.len();
         let flipped = rng.gen::<i32>() % 2 == 0;
         let rotation = rng.gen::<u8>() % 4;
 
-        ShapePermutation {
-            index,
-            permutation: Permutation {
-                flipped,
-                rotation,
-            },
+        if self.remaining[index] > 0 {
+            return Some(ShapePermutation {
+                index,
+                permutation: Permutation {
+                    flipped,
+                    rotation,
+                },
+            });
         }
+        return None;
     }
 
     pub fn load(count: u16) -> ShapeBag {
