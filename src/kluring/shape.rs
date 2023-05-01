@@ -8,10 +8,22 @@ pub struct ShapePermutation {
     pub permutation: Permutation,
 }
 
+pub const PERMUTATIONS: u8 = 8;
+
+
 #[derive(Copy, Clone)]
 pub struct Permutation {
     pub rotation: u8,
     pub flipped: bool,
+}
+
+impl Permutation {
+    pub fn from_index(index: u8) -> Permutation {
+        Permutation { 
+            rotation: index % 4,
+            flipped: index >= 4,
+        }
+    }
 }
 
 pub struct Shape {

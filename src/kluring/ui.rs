@@ -135,7 +135,7 @@ fn update_input_fields(
         entity,
         InputFieldsState {
             n: "1".into(),
-            crunch: "50".into(),
+            crunch: "0".into(),
         },
     );
 

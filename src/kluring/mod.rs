@@ -32,6 +32,7 @@ impl Plugin for KluringPlugin {
                 scored_positions: HashMap::new(),
                 bounds: Bounds::new(),
                 attempts: 0,
+                max_attempts: 0,
             })
             .add_systems(
                 (
@@ -65,6 +66,7 @@ pub struct BoardState {
     scored_positions: HashMap<GlobalPos, i32>,
     bounds: Bounds,
     attempts: usize,
+    max_attempts: usize,
 }
 
 impl BoardState {
@@ -99,45 +101,43 @@ fn find_best_shape(
 
     } else {
 
-        const MAX_ATTEMPTS: usize = 0;
-
         let best_positions = collect_candidate_positions(border_query);
         let mut attempts_count = 0;
         let mut best_attempts = Vec::new();
 
         'outer: for shape in bag.iter_available() {
             
-            let permutation = ShapePermutation {
-                index: shape.index,
-                permutation: Permutation {
-                    rotation: 0,
-                    flipped: false,
-                }
-            };
+            for permutation_index in 0..shape::PERMUTATIONS {
+                let permutation = ShapePermutation {
+                    index: shape.index,
+                    permutation: Permutation::from_index(permutation_index),
+                };
 
-            // Iterate every edge position
-            for border_pos in best_positions.iter() {
-                
-                // Iterate every position in the shape as anchor
-                let shape_positions = bag.iter_pos(&permutation);
-                for shape_tile_pos in &shape_positions {
+                // Iterate every edge position
+                for border_pos in best_positions.iter() {
                     
-                    let attempt_pos = *border_pos - *shape_tile_pos;
-                    
-                    if MAX_ATTEMPTS > 0 
-                        && attempts_count > MAX_ATTEMPTS 
-                        && best_attempts.len() > 1 {
-                        break 'outer;
-                    }
+                    // Iterate every position in the shape as anchor
+                    let shape_positions = bag.iter_pos(&permutation);
 
-                    attempts_count += 1;
-    
-                    if let Some(score) = get_placement_score(
-                        &attempt_pos,
-                        &shape_positions,
-                        &state,
-                    ) {
-                        best_attempts.push((score, permutation.clone(), attempt_pos));
+                    for shape_tile_pos in &shape_positions {
+                        
+                        let attempt_pos = *border_pos - *shape_tile_pos;
+                        
+                        if state.max_attempts > 0 
+                            && attempts_count > state.max_attempts 
+                            && best_attempts.len() > 1 {
+                            break 'outer;
+                        }
+
+                        attempts_count += 1;
+        
+                        if let Some(score) = get_placement_score(
+                            &attempt_pos,
+                            &shape_positions,
+                            &state,
+                        ) {
+                            best_attempts.push((score, permutation.clone(), attempt_pos));
+                        }
                     }
                 }
             }
@@ -529,9 +529,13 @@ fn reset(
     // apparently we get one state per input widget
     // but whatever
     let mut count = 1;
+    let mut max_attempts = 0;
     for input_field in input_fields.iter() {
         if let Ok(n) = input_field.n.parse::<u16>() {
             count = n;
+        }
+        if let Ok(crunch) = input_field.crunch.parse::<usize>() {
+            max_attempts = crunch;
         }
         break;
     }
@@ -540,5 +544,6 @@ fn reset(
 
     //state.scored_positions = HashMap::new();
     state.attempts = 0;
+    state.max_attempts = max_attempts;
     state.bounds = Bounds::new();
 }
