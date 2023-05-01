@@ -86,7 +86,7 @@ const BLOCKED: i32 = i32::MIN;
 fn find_best_shape(
     mut state: ResMut<BoardState>,
     bag: Res<ShapeBag>,
-    border_query: Query<&BorderTile>,
+    mut border_query: Query<&mut BorderTile>,
     mut place_shape_event: EventWriter<PlaceShapeEvent>,
 ) {
     if state.scored_positions.len() == 0 {
@@ -102,21 +102,27 @@ fn find_best_shape(
 
     } else {
 
-        let best_positions = collect_candidate_positions(border_query);
+        let best_positions = collect_candidate_positions(
+            &border_query,
+            state.max_attempts > 0,
+        );
         let mut attempts_count = 0;
         let mut best_attempts = Vec::new();
+        
+        // Iterate every edge position
+        let mut dead_candidates = HashSet::new();
 
-        'outer: for shape in bag.iter_available() {
+        'outer: for border_pos in best_positions.iter() {
+        
+            let mut any_match = false;
+            for shape in bag.iter_available() {
             
-            for permutation_index in 0..shape::PERMUTATIONS {
-                let permutation = ShapePermutation {
-                    index: shape.index,
-                    permutation: Permutation::from_index(permutation_index),
-                };
+                for permutation_index in 0..shape::PERMUTATIONS {
+                    let permutation = ShapePermutation {
+                        index: shape.index,
+                        permutation: Permutation::from_index(permutation_index),
+                    };
 
-                // Iterate every edge position
-                for border_pos in best_positions.iter() {
-                    
                     // Iterate every position in the shape as anchor
                     let shape_positions = bag.iter_pos(&permutation);
 
@@ -124,6 +130,7 @@ fn find_best_shape(
                         
                         let attempt_pos = *border_pos - *shape_tile_pos;
                         
+                        // early out if we hit maximum crunch
                         if state.max_attempts > 0 
                             && attempts_count > state.max_attempts 
                             && best_attempts.len() > 1 {
@@ -137,10 +144,15 @@ fn find_best_shape(
                             &shape_positions,
                             &state,
                         ) {
+                            any_match = true;
                             best_attempts.push((score, permutation.clone(), attempt_pos));
                         }
                     }
                 }
+            }
+
+            if !any_match {
+                dead_candidates.insert(*border_pos);
             }
         }
 
@@ -151,6 +163,14 @@ fn find_best_shape(
                 permutation,
                 pos: attempt_pos,
             });
+        }
+
+        if dead_candidates.len() > 0 {
+            for mut border_tile in border_query.iter_mut() {
+                if dead_candidates.contains(&border_tile.global_pos) {
+                    border_tile.dead = true;
+                }
+            }
         }
 
         state.attempts += attempts_count;
@@ -255,7 +275,8 @@ fn place_shape(
                 new_tile_commands.insert(BorderTile {
                     adjacency_score: 0,
                     distance_score: 0,
-                    global_pos: GlobalPos::from_chunk_tile(&chunk_pos, &tile_pos)
+                    global_pos: GlobalPos::from_chunk_tile(&chunk_pos, &tile_pos),
+                    dead: false
                 });
             }
 
@@ -369,13 +390,19 @@ fn update_boundary_score(
 }
 
 
-fn collect_candidate_positions(border_query: Query<&BorderTile>) -> Vec<GlobalPos> {
+fn collect_candidate_positions(
+    border_query: &Query<&mut BorderTile>,
+    sort_best: bool,
+) -> Vec<GlobalPos> {
 
     let mut border_tiles: Vec<&BorderTile> = border_query
         .iter()
+        .filter(|border | !border.dead)
         .collect();
 
-    border_tiles.sort_by(|a, b| b.score().cmp(&a.score()));
+    if sort_best {
+        border_tiles.sort_by(|a, b| b.score().cmp(&a.score()));
+    }
 
     let mut border: Vec<GlobalPos> = border_tiles
         .iter()
@@ -560,22 +587,15 @@ fn scroll_events(
     mut cameras: Query<&mut Transform, With<Camera>>,
     mut scroll_evr: EventReader<MouseWheel>,
 ) {
-    use bevy::input::mouse::MouseScrollUnit;
-
     let mut zoom = 1.;
 
     const ZOOM_SPEED: f32 = 0.1;
 
     for ev in scroll_evr.iter() {
-        match ev.unit {
-            MouseScrollUnit::Line => {
-                zoom += ev.y * ZOOM_SPEED;
-                //println!("Scroll (line units): vertical: {}, horizontal: {}", ev.y, ev.x);
-            }
-            MouseScrollUnit::Pixel => {
-                zoom += ev.y * ZOOM_SPEED;
-                //println!("Scroll (pixel units): vertical: {}, horizontal: {}", ev.y, ev.x);
-            }
+        if ev.y < 0. {
+            zoom = 1. - ZOOM_SPEED;
+        } else {
+            zoom = 1. + ZOOM_SPEED;
         }
     }
 

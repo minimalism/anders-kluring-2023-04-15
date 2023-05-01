@@ -115,6 +115,7 @@ pub struct BorderTile {
     pub adjacency_score: i32,
     pub distance_score: i32,
     pub global_pos: GlobalPos,
+    pub dead: bool,
 }
 
 impl BorderTile {

@@ -1,6 +1,6 @@
 use bevy::{prelude::*, window::PresentMode};
 use kluring::KluringPlugin;
-use bevy_inspector_egui::quick::WorldInspectorPlugin;
+// use bevy_inspector_egui::quick::WorldInspectorPlugin;
 
 mod kluring;
 

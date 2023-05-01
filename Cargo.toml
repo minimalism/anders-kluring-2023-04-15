@@ -16,7 +16,7 @@ bevy = "0.10"
 bevy_ecs_tilemap = { version = "0.10", features = ["atlas"] }
 kayak_ui = "0.3"
 rand = "0.8.5"
-bevy-inspector-egui = "0.18"
+#bevy-inspector-egui = "0.18"
 
 [profile.wasm-release]
 # Use release profile as default values
