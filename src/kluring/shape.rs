@@ -110,6 +110,13 @@ impl ShapeBag {
             }
         }
 
+        if shape_permutation.permutation.flipped {
+            for point in &mut ret {
+                point.x = -point.x;
+                //point.y = y;
+            }
+        }
+
         ret
     }
 

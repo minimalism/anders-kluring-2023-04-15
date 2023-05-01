@@ -1,6 +1,6 @@
 use std::collections::{HashSet, HashMap, hash_map::Entry};
 
-use bevy::{prelude::*};
+use bevy::{prelude::*, input::mouse::MouseWheel};
 use bevy_ecs_tilemap::prelude::*;
 
 use crate::kluring::{shape::Permutation, tile::{TILEMAP_SIZE, create_chunk}};
@@ -52,6 +52,7 @@ impl Plugin for KluringPlugin {
                     apply_system_buffers,
                 )
             )
+            .add_systems((scroll_events, keyboard_input))
         ;
     }
 }
@@ -426,8 +427,15 @@ fn get_placement_score(
             score_sum += score;
         }
 
-        expanded_bounds.expand(tile_pos);
+        expanded_bounds.expand(&global_pos);
     }
+
+    // subtract score for total bounds size?
+    let original_area = state.bounds.width() * state.bounds.height();
+    let area = expanded_bounds.width() * expanded_bounds.height();
+    let area_penalty = area - original_area;
+
+    score_sum -= area_penalty;
 
     // sum empty tiles in bounds...?
     if false {
@@ -546,4 +554,64 @@ fn reset(
     state.attempts = 0;
     state.max_attempts = max_attempts;
     state.bounds = Bounds::new();
+}
+
+fn scroll_events(
+    mut cameras: Query<&mut Transform, With<Camera>>,
+    mut scroll_evr: EventReader<MouseWheel>,
+) {
+    use bevy::input::mouse::MouseScrollUnit;
+
+    let mut zoom = 1.;
+
+    const ZOOM_SPEED: f32 = 0.1;
+
+    for ev in scroll_evr.iter() {
+        match ev.unit {
+            MouseScrollUnit::Line => {
+                zoom += ev.y * ZOOM_SPEED;
+                //println!("Scroll (line units): vertical: {}, horizontal: {}", ev.y, ev.x);
+            }
+            MouseScrollUnit::Pixel => {
+                zoom += ev.y * ZOOM_SPEED;
+                //println!("Scroll (pixel units): vertical: {}, horizontal: {}", ev.y, ev.x);
+            }
+        }
+    }
+
+    for mut camera in cameras.iter_mut() {
+        camera.scale.x *= zoom;
+        camera.scale.y *= zoom;
+        //camera.scale.z = zoom;
+    }
+
+}
+
+fn keyboard_input(
+    mut cameras: Query<&mut Transform, With<Camera>>,
+    keys: Res<Input<KeyCode>>,
+) {
+
+    const PAN_SPEED: f32 = 2.;
+    let mut x = 0.;
+    let mut y = 0.;
+
+    if keys.any_pressed([KeyCode::W, KeyCode::Up]) {
+        y += PAN_SPEED;
+    }
+    if keys.any_pressed([KeyCode::A, KeyCode::Left]) {
+        x -= PAN_SPEED;
+    }
+    if keys.any_pressed([KeyCode::S, KeyCode::Down]) {
+        y -= PAN_SPEED;
+    }
+    if keys.any_pressed([KeyCode::D, KeyCode::Right]) {
+        x += PAN_SPEED;
+    }
+
+    for mut camera in cameras.iter_mut() {
+        camera.translation.x += x;
+        camera.translation.y += y;
+        //camera.scale.z = zoom;
+    }
 }
